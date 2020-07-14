@@ -8,7 +8,6 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
-import android.content.res.Resources;
 import android.os.Binder;
 import android.os.Build;
 import android.os.IBinder;
@@ -16,8 +15,6 @@ import android.os.PowerManager;
 import android.app.NotificationChannel;
 
 import org.json.JSONObject;
-
-import io.flutter.embedding.android.FlutterActivityLaunchConfigs;
 
 import static android.os.PowerManager.PARTIAL_WAKE_LOCK;
 
@@ -33,9 +30,6 @@ public class ForegroundService extends Service {
     // Default text of the background notification
     private static final String NOTIFICATION_TEXT =
             "Doing heavy tasks.";
-
-    // Default icon of the background notification
-    private static final String NOTIFICATION_ICON = "icon";
 
     // Binder given to clients
     private final IBinder binder = new ForegroundBinder();
@@ -96,12 +90,7 @@ public class ForegroundService extends Service {
      */
     @SuppressLint("WakelockTimeout")
     private void keepAwake() {
-        JSONObject settings = BackgroundMode.getSettings();
-        boolean isSilent = settings.optBoolean("silent", false);
-
-        if (!isSilent) {
-            startForeground(NOTIFICATION_ID, makeNotification());
-        }
+        startForeground(NOTIFICATION_ID, makeNotification());
 
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
 
@@ -113,6 +102,7 @@ public class ForegroundService extends Service {
     /**
      * Stop background mode.
      */
+    @TargetApi(Build.VERSION_CODES.ECLAIR)
     private void sleepWell() {
         stopForeground(true);
         getNotificationManager().cancel(NOTIFICATION_ID);
@@ -125,37 +115,25 @@ public class ForegroundService extends Service {
 
     /**
      * Create a notification as the visible part to be able to put the service
-     * in a foreground state by using the default settings.
+     * in a foreground state.
      */
     private Notification makeNotification() {
-        return makeNotification(BackgroundMode.getSettings());
-    }
-
-    /**
-     * Create a notification as the visible part to be able to put the service
-     * in a foreground state.
-     *
-     * @param settings The config settings
-     */
-    private Notification makeNotification(JSONObject settings) {
         String CHANNEL_ID = "background_mode-id";
         if (Build.VERSION.SDK_INT >= 26) {
-            // The user-visible name of the channel.
             CharSequence name = "background_mode";
             String description = "background_mode-moden notification";
 
-            int importance = NotificationManager.IMPORTANCE_LOW;
+            int importance = NotificationManager.IMPORTANCE_HIGH;
 
             NotificationChannel mChannel = new NotificationChannel(CHANNEL_ID, name, importance);
 
-            // Configure the notification channel.
             mChannel.setDescription(description);
 
             getNotificationManager().createNotificationChannel(mChannel);
         }
-        String title = settings.optString("title", NOTIFICATION_TITLE);
-        String text = settings.optString("text", NOTIFICATION_TEXT);
-        boolean bigText = settings.optBoolean("bigText", false);
+
+        String title = NOTIFICATION_TITLE;
+        String text = NOTIFICATION_TEXT;
 
         Context context = getApplicationContext();
         String pkgName = context.getPackageName();
@@ -166,112 +144,29 @@ public class ForegroundService extends Service {
                 .setContentTitle(title)
                 .setContentText(text)
                 .setOngoing(true)
-                .setSmallIcon(getIconResId(settings));
+                .setSmallIcon(android.R.color.transparent);
 
         if (Build.VERSION.SDK_INT >= 26) {
             notification.setChannelId(CHANNEL_ID);
         }
 
-        if (settings.optBoolean("hidden", true)) {
-            notification.setPriority(Notification.PRIORITY_MIN);
-        }
+        notification.setPriority(Notification.PRIORITY_MAX);
 
-        if (bigText || text.contains("\n")) {
-            notification.setStyle(
-                    new Notification.BigTextStyle().bigText(text));
-        }
-
-        setColor(notification, settings);
-
-        if (intent != null && settings.optBoolean("resume")) {
-            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-            PendingIntent contentIntent = PendingIntent.getActivity(
-                    context, NOTIFICATION_ID, intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT);
+        notification.setStyle(
+                new Notification.BigTextStyle().bigText(text));
 
 
-            notification.setContentIntent(contentIntent);
-        }
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent contentIntent = PendingIntent.getActivity(
+                context, NOTIFICATION_ID, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT);
+
+
+        notification.setContentIntent(contentIntent);
 
         return notification.build();
     }
 
-    /**
-     * Update the notification.
-     *
-     * @param settings The config settings
-     */
-    protected void updateNotification(JSONObject settings) {
-        boolean isSilent = settings.optBoolean("silent", false);
-
-        if (isSilent) {
-            stopForeground(true);
-            return;
-        }
-
-        Notification notification = makeNotification(settings);
-        getNotificationManager().notify(NOTIFICATION_ID, notification);
-
-    }
-
-    /**
-     * Retrieves the resource ID of the app icon.
-     *
-     * @param settings A JSON dict containing the icon name.
-     */
-    private int getIconResId(JSONObject settings) {
-        String icon = settings.optString("icon", NOTIFICATION_ICON);
-
-        int resId = getIconResId(icon, "mipmap");
-
-        if (resId == 0) {
-            resId = getIconResId(icon, "drawable");
-        }
-
-        return resId;
-    }
-
-    /**
-     * Retrieve resource id of the specified icon.
-     *
-     * @param icon The name of the icon.
-     * @param type The resource type where to look for.
-     * @return The resource id or 0 if not found.
-     */
-    private int getIconResId(String icon, String type) {
-        Resources res = getResources();
-        String pkgName = getPackageName();
-
-        int resId = res.getIdentifier(icon, type, pkgName);
-
-        if (resId == 0) {
-            resId = res.getIdentifier("icon", type, pkgName);
-        }
-
-        return resId;
-    }
-
-    /**
-     * Set notification color if its supported by the SDK.
-     *
-     * @param notification A Notification.Builder instance
-     * @param settings     A JSON dict containing the color definition (red: FF0000)
-     */
-    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
-    private void setColor(Notification.Builder notification, JSONObject settings) {
-
-        String hex = settings.optString("color", null);
-
-        if (Build.VERSION.SDK_INT < 21 || hex == null)
-            return;
-
-        try {
-            int aRGB = Integer.parseInt(hex, 16) + 0xFF000000;
-            notification.setColor(aRGB);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
 
     /**
      * Returns the shared notification service manager.
