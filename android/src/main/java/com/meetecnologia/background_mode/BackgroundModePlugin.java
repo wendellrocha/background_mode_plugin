@@ -4,6 +4,7 @@ import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.app.Activity;
 import android.app.ActivityManager;
+import android.app.KeyguardManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.ContextWrapper;
@@ -15,6 +16,8 @@ import android.os.IBinder;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.util.Log;
+import android.view.Window;
+import android.view.WindowManager;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.RequiresApi;
@@ -35,6 +38,7 @@ import io.flutter.plugin.common.PluginRegistry.Registrar;
 
 import static android.content.Context.ACTIVITY_SERVICE;
 import static android.content.Context.BIND_AUTO_CREATE;
+import static android.content.Context.KEYGUARD_SERVICE;
 import static android.content.Context.POWER_SERVICE;
 import static android.os.Build.VERSION.SDK_INT;
 import static android.view.WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON;
@@ -79,19 +83,19 @@ public class BackgroundModePlugin implements FlutterPlugin, MethodCallHandler, A
         this.mainActivity = flutterActivity;
     }
 
-    @RequiresApi(api = Build.VERSION_CODES.M)
+    @RequiresApi(api = Build.VERSION_CODES.O)
     @Override
     public void onMethodCall(@NonNull MethodCall call, @NonNull Result result) {
         if (call.method.equals("background_mode.bringToForeground")) {
             Intent intent = applicationContext.getPackageManager().getLaunchIntentForPackage(applicationContext.getPackageName());
             intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            clearScreenAndKeyguardFlags(applicationContext);
             applicationContext.startActivity(intent);
             result.success(null);
         } else if (call.method.equals("background_mode.start")) {
             startService(applicationContext);
             acquireWakeLock(applicationContext);
             disableBatteryOptimizations(applicationContext);
+            clearKeyguardFlags(applicationContext);
             result.success(null);
         } else if (call.method.equals("background_mode.disable")) {
             releaseWakeLock();
@@ -177,21 +181,9 @@ public class BackgroundModePlugin implements FlutterPlugin, MethodCallHandler, A
         }
     };
 
-    @SuppressLint("WrongConstant")
-    private void clearScreenAndKeyguardFlags(Context context) {
-        Intent intent = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
-        assert intent != null;
-        intent.addFlags(
-                FLAG_ALLOW_LOCK_WHILE_SCREEN_ON | FLAG_SHOW_WHEN_LOCKED | FLAG_TURN_SCREEN_ON | FLAG_DISMISS_KEYGUARD);
-    }
-
-    @SuppressLint("WrongConstant")
-    @RequiresApi(api = Build.VERSION_CODES.O)
     private void clearKeyguardFlags(Context context) {
-        Intent intent = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
-        assert intent != null;
-        intent.removeFlags(
-                FLAG_DISMISS_KEYGUARD | FLAG_ALLOW_LOCK_WHILE_SCREEN_ON | FLAG_SHOW_WHEN_LOCKED | FLAG_TURN_SCREEN_ON);
+        Window window = mainActivity.getWindow();
+        window.addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD | WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON | WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
     }
 
     /**
@@ -202,7 +194,7 @@ public class BackgroundModePlugin implements FlutterPlugin, MethodCallHandler, A
 
         releaseWakeLock();
 
-        int level = PowerManager.SCREEN_DIM_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP;
+        int level = PowerManager.ACQUIRE_CAUSES_WAKEUP | PowerManager.SCREEN_DIM_WAKE_LOCK;
         wakeLock = pm.newWakeLock(level, "backgroundmode:wakelock");
         wakeLock.setReferenceCounted(false);
         wakeLock.acquire(1000);
